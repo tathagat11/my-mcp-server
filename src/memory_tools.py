@@ -53,7 +53,7 @@ async def add_memory(key: str, value: str) -> str:
         except IOError as e:
             logging.exception("IOError while saving memory to %s: %s", MEMORY_FILE, e)
             return "Sorry, I encountered an error trying to save that memory."
-        except Exception as e: # pylint: disable=broad-except
+        except Exception as e:  # pylint: disable=broad-except
             logging.exception(
                 "Unexpected error while saving memory to %s: %s", MEMORY_FILE, e
             )
@@ -132,7 +132,7 @@ async def lookup_memories(query: str) -> str:
                 "IOError while looking up memory from %s: %s", MEMORY_FILE, e
             )
             return "Sorry, I encountered an error trying to access memories."
-        except Exception as e: # pylint: disable=broad-except
+        except Exception as e:  # pylint: disable=broad-except
             logging.exception(
                 "Unexpected error while looking up memory from %s: %s", MEMORY_FILE, e
             )

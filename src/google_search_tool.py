@@ -50,7 +50,7 @@ async def google_search(query: str) -> str:
         except HttpError as e:
             logging.exception("An HTTP error occurred during Google search: %s", e)
             return f"Error performing search: {e.resp.status} {e.resp.reason}"
-        except Exception as e: # pylint: disable=broad-except
+        except Exception as e:  # pylint: disable=broad-except
             logging.exception(
                 "An unexpected error occurred during Google search: %s", e
             )
