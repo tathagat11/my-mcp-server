@@ -1,89 +1,15 @@
-"""MCP server tools"""
+"""Memory Tools for MCP Server"""
 
-import os
 import asyncio
-import logging
-import sys
 import json
+import logging
 from pathlib import Path
-from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 
-mcp = FastMCP("search")
-
-load_dotenv()
-
-USER_AGENT = "weather-app/1.0"
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
 MEMORY_FILE = Path("memories.json")
-
-# Check if Google keys are available
-if not GOOGLE_API_KEY:
-    print(
-        "Warning: GOOGLE_API_KEY environment variable not set. Google search tool will not work."
-    )
-if not GOOGLE_CSE_ID:
-    print(
-        "Warning: GOOGLE_CSE_ID environment variable not set. Google search tool will not work."
-    )
-
-
-@mcp.tool()
-async def google_search(query: str) -> str:
-    """Searches the public web using Google for current information, facts, or external resources.
-
-    Consider using this tool whenever the user asks a question where up-to-date information might be helpful,
-    or if the answer is likely found outside your internal knowledge base. Also useful for checking facts
-    or finding specific URLs or details.
-
-    Args:
-        query: The keywords or question to search for on Google.
-    """
-    if not GOOGLE_API_KEY or not GOOGLE_CSE_ID:
-        return "Google Search tool is not configured. Missing API key or CSE ID."
-
-    def search_sync():
-        try:
-            service = build("customsearch", "v1", developerKey=GOOGLE_API_KEY)
-            result = (
-                service.cse()  # pylint: disable=no-member
-                .list(q=query, cx=GOOGLE_CSE_ID, num=5)
-                .execute()
-            )
-            search_items = result.get("items", [])
-            if not search_items:
-                return "No results found."
-
-            output = f"Search results for '{query}':\n\n"
-            for i, item in enumerate(search_items):
-                title = item.get("title", "No Title")
-                link = item.get("link", "#")
-                snippet = item.get("snippet", "No Snippet").replace("\n", " ")
-                output += f"{i+1}. {title}\n   Link: {link}\n   Snippet: {snippet}\n\n"
-            logging.info("Search results: %s", output)
-            return output.strip()
-
-        except HttpError as e:
-            logging.exception("An HTTP error occurred during Google search: %s", e)
-            return f"Error performing search: {e.resp.status} {e.resp.reason}"
-        except Exception as e:
-            logging.exception(
-                "An unexpected error occurred during Google search: %s", e
-            )
-            return "An unexpected error occurred during the search."
-
-    loop = asyncio.get_running_loop()
-    result_str = await loop.run_in_executor(None, search_sync)
-    return result_str
-
 
 # --- Memory Tools ---
 
-
-@mcp.tool()
 async def add_memory(key: str, value: str) -> str:
     """Stores a piece of user-specific information, fact, preference, or context using a key-value pair.
 
@@ -100,6 +26,8 @@ async def add_memory(key: str, value: str) -> str:
         try:
             memories = {}
             if MEMORY_FILE.exists():
+                # Ensure the parent directory exists (though it should in this case)
+                MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
                 with open(MEMORY_FILE, 'r', encoding='utf-8') as f:
                     try:
                         loaded_data = json.load(f)
@@ -107,22 +35,24 @@ async def add_memory(key: str, value: str) -> str:
                         if isinstance(loaded_data, dict):
                             memories = loaded_data
                         else:
-                            logging.warning("Memory file did not contain a dictionary. Resetting.")
+                            logging.warning("Memory file %s did not contain a dictionary. Resetting.", MEMORY_FILE)
                     except json.JSONDecodeError:
-                        logging.warning("Memory file is corrupted. Resetting.")
+                        logging.warning("Memory file %s is corrupted. Resetting.", MEMORY_FILE)
             
             memories[key] = value # Add or update the key-value pair
             
+            # Ensure the parent directory exists before writing
+            MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
             with open(MEMORY_FILE, 'w', encoding='utf-8') as f:
                 json.dump(memories, f, indent=2)
-            logging.info("Saved memory: Key='%s', Value='%s'", key, value)
+            logging.info("Saved memory to %s: Key='%s', Value='%s'", MEMORY_FILE, key, value)
             return f"Okay, I've remembered that '{key}' is '{value}'"
 
         except IOError as e:
-            logging.exception("IOError while saving memory: %s", e)
+            logging.exception("IOError while saving memory to %s: %s", MEMORY_FILE, e)
             return "Sorry, I encountered an error trying to save that memory."
         except Exception as e:
-            logging.exception("Unexpected error while saving memory: %s", e)
+            logging.exception("Unexpected error while saving memory to %s: %s", MEMORY_FILE, e)
             return "Sorry, an unexpected error occurred while saving the memory."
 
     loop = asyncio.get_running_loop()
@@ -130,7 +60,6 @@ async def add_memory(key: str, value: str) -> str:
     return result_str
 
 
-@mcp.tool()
 async def lookup_memories(query: str) -> str:
     """Searches stored memories (key-value pairs) for relevant user-specific information.
 
@@ -155,8 +84,10 @@ async def lookup_memories(query: str) -> str:
                     if isinstance(loaded_data, dict):
                         memories = loaded_data
                     else:
+                         logging.error("Memory storage %s is corrupted (not a dictionary). Cannot lookup.", MEMORY_FILE)
                          return "Memory storage is corrupted (not a dictionary). Cannot lookup."
                 except json.JSONDecodeError:
+                    logging.error("Memory storage %s is corrupted (invalid JSON). Cannot lookup.", MEMORY_FILE)
                     return "Memory storage is corrupted (invalid JSON). Cannot lookup."
 
             query_words = set(query.lower().split())
@@ -175,30 +106,26 @@ async def lookup_memories(query: str) -> str:
                     found_items.append(f"- {key}: {value}")
 
             if not found_items:
-                return f"I couldn't find any memories where the key or value contained keywords from '{query}'."
+                return f"I couldn't find any memories in {MEMORY_FILE} where the key or value contained keywords from '{query}'."
             else:
                 formatted_results = "\n".join(found_items)
                 logging.info(
-                    "Found %d memories for query '%s'", len(found_items), query
+                    "Found %d memories in %s for query '%s'", len(found_items), MEMORY_FILE, query
                 )
                 return f"Here are the memories I found related to '{query}':\n{formatted_results}"
         except IOError as e:
-            logging.exception("IOError while looking up memory: %s", e)
+            logging.exception("IOError while looking up memory from %s: %s", MEMORY_FILE, e)
             return "Sorry, I encountered an error trying to access memories."
         except Exception as e:
-            logging.exception("Unexpected error while looking up memory: %s", e)
+            logging.exception("Unexpected error while looking up memory from %s: %s", MEMORY_FILE, e)
             return "Sorry, an unexpected error occurred while looking up memories."
 
     loop = asyncio.get_running_loop()
     result_str = await loop.run_in_executor(None, lookup_sync)
     return result_str
 
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        stream=sys.stderr,
-    )
-    logging.info("Starting MCP server...")
-    mcp.run(transport="stdio")
+def register_tools(mcp_instance: FastMCP):
+    """Registers the memory tools with the MCP instance."""
+    mcp_instance.tool()(add_memory)
+    mcp_instance.tool()(lookup_memories)
+    logging.info("Registered add_memory and lookup_memories tools.")
